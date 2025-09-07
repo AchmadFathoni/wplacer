@@ -389,6 +389,7 @@ class WPlacer {
         this.userInfo = null;
         this.tiles = new Map();
         this.token = null;
+        this.pawtect = null;
     }
 
     async _fetch(url, options) {
@@ -457,9 +458,11 @@ class WPlacer {
     }
 
     async post(url, body) {
+        const headers = { Accept: '*/*', 'Content-Type': 'text/plain;charset=UTF-8', Referer: 'https://wplace.live/' };
+        if (this.pawtect) headers['x-pawtect-token'] = this.pawtect;
         const req = await this._fetch(url, {
             method: 'POST',
-            headers: { Accept: '*/*', 'Content-Type': 'text/plain;charset=UTF-8', Referer: 'https://wplace.live/' },
+            headers,
             body: JSON.stringify(body),
         });
         const data = await req.json();
@@ -520,8 +523,9 @@ class WPlacer {
         return true;
     }
 
-    hasColor() {
-        return true;
+    hasColor(id) {
+        if (id < 32) return true;
+        return !!(this.userInfo.extraColorsBitmap & (1 << (id - 32)));
     }
 
     async _executePaint(tx, ty, body) {
@@ -634,7 +638,7 @@ class WPlacer {
                     continue;
                 }
                 // positive colors
-                if (tplColor > 0) {
+                if (tplColor > 0 && this.hasColor(tplColor)) {
                     const shouldPaint = this.templateSettings.skipPaintedPixels
                         ? canvasColor === 0
                         : tplColor !== canvasColor;
@@ -725,6 +729,7 @@ class WPlacer {
         for (const k in byTile) {
             const [tx, ty] = k.split(',').map(Number);
             const body = { ...byTile[k], t: this.token };
+            if (globalThis.__wplacer_last_fp) body.fp = globalThis.__wplacer_last_fp;
             const r = await this._executePaint(tx, ty, body);
             total += r.painted;
         }
@@ -1178,6 +1183,8 @@ class TemplateManager {
         while (!done && this.running) {
             try {
                 wplacer.token = await TokenManager.getToken(this.name);
+                // Pull latest pawtect token if available
+                wplacer.pawtect = globalThis.__wplacer_last_pawtect || null;
                 const painted = await wplacer.paint(this.currentPixelSkip, colorFilter);
                 paintedTotal += painted;
                 done = true;
@@ -1261,12 +1268,12 @@ class TemplateManager {
                 let colorsToPaint;
                 const isColorMode = currentSettings.drawingOrder === 'color';
                 if (isColorMode) {
-                    const allColors = this.template.data.flat().filter((c) => c > 0);   
+                    const allColors = this.template.data.flat().filter((c) => c > 0);
                     const colorCounts = allColors.reduce((acc, color) => {
                         acc[color] = (acc[color] || 0) + 1;
                         return acc;
                     }, {});
-                    
+
                     const customOrder = getColorOrderForTemplate(this.templateId);
                     let sortedColors = Object.keys(colorCounts).map(Number);
 
@@ -1322,9 +1329,9 @@ class TemplateManager {
                     const mismatchedColors = new Set(checkResult.mismatchedPixels.map(p => p.color));
                     const allColors = this.template.data.flat().filter((c) => c > 0);
                     const colorCounts = allColors.reduce((acc, color) => ({ ...acc, [color]: (acc[color] || 0) + 1 }), {});
-                    
+
                     let sortedColors = Object.keys(colorCounts).map(Number).sort((a, b) => (a === 1 ? -1 : b === 1 ? 1 : colorCounts[a] - colorCounts[b]));
-                    
+
                     colorsToPaint = sortedColors.filter(c => mismatchedColors.has(c));
                     if (this.eraseMode && mismatchedColors.has(0)) {
                         colorsToPaint.push(0);
@@ -1335,7 +1342,7 @@ class TemplateManager {
 
                 for (const color of colorsToPaint) {
                     if (!this.running) break;
-                    
+
                     let highestDensityWithPixels = 1;
                     for (let density = currentSettings.pixelSkip; density > 1; density /= 2) {
                         if (checkResult.mismatchedPixels.some(p => (color === null || p.color === color) && (p.localX + p.localY) % density === 0)) {
@@ -1350,7 +1357,7 @@ class TemplateManager {
                     for (this.currentPixelSkip = highestDensityWithPixels; this.currentPixelSkip >= 1; this.currentPixelSkip /= 2) {
                         if (!this.running) break;
                         log('SYSTEM', 'wplacer', `[${this.name}] Starting pass (1/${this.currentPixelSkip}) for color ${isColorMode ? (COLOR_NAMES[color] || 'Erase') : 'All'}`);
-                        
+
                         let passComplete = false;
                         while (this.running && !passComplete) {
                             if (this.userQueue.length === 0) {
@@ -1359,7 +1366,7 @@ class TemplateManager {
                                 this.userQueue = [...this.userIds];
                                 continue;
                             }
-                            
+
                             let foundUserForTurn = false;
                             const queueSize = this.userQueue.length;
                             for (let i = 0; i < queueSize; i++) {
@@ -1378,10 +1385,10 @@ class TemplateManager {
                                         try { await w.login(users[userId].cookies); } catch (e) { logUserError(e, userId, users[userId].name, 'opportunistic resync'); } finally { activeBrowserUsers.delete(userId); }
                                     }
                                 }
-                                
+
                                 const predicted = ChargeCache.predict(userId, now);
                                 const threshold = predicted ? Math.max(1, Math.floor(predicted.max * currentSettings.chargeThreshold)) : Infinity;
-                                
+
                                 if (predicted && Math.floor(predicted.count) >= threshold) {
                                     activeBrowserUsers.add(userId);
                                     const wplacer = new WPlacer({ template: this.template, coords: this.coords, globalSettings: currentSettings, templateSettings: this, templateName: this.name });
@@ -1389,9 +1396,9 @@ class TemplateManager {
                                         const userInfo = await wplacer.login(users[userId].cookies);
                                         this.status = `Running user ${userInfo.name} | Pass (1/${this.currentPixelSkip})`;
                                         log(userInfo.id, userInfo.name, `[${this.name}] 🔋 Predicted charges: ${Math.floor(predicted.count)}/${predicted.max}.`);
-                                        
+
                                         await this._performPaintTurn(wplacer, color);
-                                        
+
                                         // A paint was attempted, we assume the pass is not yet complete and will re-evaluate.
                                         foundUserForTurn = true;
                                         await this.handleUpgrades(wplacer);
@@ -1402,7 +1409,7 @@ class TemplateManager {
                                         activeBrowserUsers.delete(userId);
                                         this.userQueue.push(userId);
                                     }
-                                    if (foundUserForTurn) break; 
+                                    if (foundUserForTurn) break;
                                 } else {
                                     this.userQueue.push(userId);
                                 }
@@ -1492,21 +1499,21 @@ let colorOrdering = loadColorOrdering();
 // Extract unique colors from template data
 function getColorsInTemplate(templateData) {
     if (!templateData?.data) return [];
-    
+
     const uniqueColors = new Set();
-    
+
     // Flatten and filter in one pass
     templateData.data.flat().forEach(colorId => {
         if (colorId > 0) uniqueColors.add(colorId);
     });
-    
+
     return Array.from(uniqueColors).sort((a, b) => a - b);
 }
 
 // Load color ordering from disk
 function loadColorOrdering() {
     const orderingPath = path.join(DATA_DIR, 'color_ordering.json');
-    
+
     if (existsSync(orderingPath)) {
         try {
             const data = JSON.parse(readFileSync(orderingPath, 'utf8'));
@@ -1518,7 +1525,7 @@ function loadColorOrdering() {
             console.error('Error loading color ordering:', e.message);
         }
     }
-    
+
     return {
         global: [...defaultColorOrder],
         templates: {}
@@ -1528,7 +1535,7 @@ function loadColorOrdering() {
 // Save color ordering to disk
 function saveColorOrdering() {
     const orderingPath = path.join(DATA_DIR, 'color_ordering.json');
-    
+
     try {
         writeFileSync(orderingPath, JSON.stringify(colorOrdering, null, 2));
         console.log('Color ordering saved successfully');
@@ -1540,12 +1547,12 @@ function saveColorOrdering() {
 
 // Helper to get color order for specific context
 function getColorOrder(templateId = null) {
-    return templateId && colorOrdering.templates[templateId] 
+    return templateId && colorOrdering.templates[templateId]
         ? colorOrdering.templates[templateId]
         : colorOrdering.global;
 }
 
-// Helper to set color order for specific context  
+// Helper to set color order for specific context
 function setColorOrder(order, templateId = null) {
     if (templateId) {
         colorOrdering.templates[templateId] = [...order];
@@ -1599,9 +1606,19 @@ app.get('/errors', (req, res) => {
 
 app.get('/token-needed', (_req, res) => res.json({ needed: TokenManager.isTokenNeeded }));
 app.post('/t', (req, res) => {
-    const { t } = req.body || {};
+    const { t, pawtect, fp } = req.body || {};
     if (!t) return res.sendStatus(HTTP_STATUS.BAD_REQ);
+    // Store Turnstile token as usual
     TokenManager.setToken(t);
+    // Also keep latest pawtect in memory for pairing with paints
+    try {
+        if (pawtect && typeof pawtect === 'string') {
+            globalThis.__wplacer_last_pawtect = pawtect;
+        }
+        if (fp && typeof fp === 'string') {
+            globalThis.__wplacer_last_fp = fp;
+        }
+    } catch {}
     res.sendStatus(HTTP_STATUS.OK);
 });
 
@@ -1713,7 +1730,7 @@ app.post('/users/status', async (_req, res) => {
 // Templates
 app.get('/templates', (req, res) => {
     const templateList = {};
-    
+
     for (const id in templates) {
         const manager = templates[id];
         try {
@@ -1725,7 +1742,7 @@ app.get('/templates', (req, res) => {
                 console.warn(`Could not generate share code for template ${id}: ${shareCodeError.message}`);
                 shareCode = null; // Don't include invalid share code
             }
-            
+
             templateList[id] = {
                 id: id,
                 name: manager.name,
@@ -1756,7 +1773,7 @@ app.get('/templates', (req, res) => {
             console.warn(`Error processing template ${id} for API response: ${error.message}`);
         }
     }
-    
+
     res.json(templateList);
 });
 
@@ -1941,28 +1958,28 @@ app.get('/canvas', async (req, res) => {
 // Get color ordering
 app.get('/color-ordering', (req, res) => {
     const { templateId } = req.query;
-    
+
     if (templateId && templates[templateId]) {
         const availableColors = getColorsInTemplate(templates[templateId].template);
         const currentOrder = getColorOrder(templateId).filter(id => availableColors.includes(id));
         res.json({ order: currentOrder, availableColors, filteredByTemplate: true });
     } else {
-        res.json({ 
-            order: colorOrdering.global, 
-            availableColors: Object.values(palette), 
-            filteredByTemplate: false 
+        res.json({
+            order: colorOrdering.global,
+            availableColors: Object.values(palette),
+            filteredByTemplate: false
         });
     }
 });
 
-// Update global color ordering  
+// Update global color ordering
 app.put('/color-ordering/global', (req, res) => {
     const validOrder = validateColorIds(req.body.order || []);
-    
+
     if (!validOrder.length) {
         return res.status(400).json({ error: 'No valid color IDs provided' });
     }
-    
+
     setColorOrder(validOrder);
     res.json({ success: true });
 });
@@ -1971,16 +1988,16 @@ app.put('/color-ordering/global', (req, res) => {
 app.put('/color-ordering/template/:templateId', (req, res) => {
     const { templateId } = req.params;
     const template = templates[templateId];
-    
+
     if (!template) {
         return res.status(400).json({ error: 'Template not found' });
     }
-    
+
     const validOrder = validateColorIds(req.body.order || []);
     if (!validOrder.length) {
         return res.status(400).json({ error: 'No valid color IDs provided' });
     }
-    
+
     setColorOrder(validOrder, templateId);
     log('SYSTEM', 'color-ordering', `Template "${template.name}" color order updated (${validOrder.length} colors)`);
     res.json({ success: true });
@@ -1989,33 +2006,33 @@ app.put('/color-ordering/template/:templateId', (req, res) => {
 // Reset template color ordering
 app.delete('/color-ordering/template/:templateId', (req, res) => {
     const { templateId } = req.params;
-    
+
     if (colorOrdering.templates[templateId]) {
         delete colorOrdering.templates[templateId];
         saveColorOrdering();
-        
+
         const templateName = templates[templateId]?.name || 'Unknown';
         log('SYSTEM', 'color-ordering', `Template "${templateName}" color order reset to global`);
     }
-    
+
     res.json({ success: true });
 });
 
 // Get template colors
 app.get('/template/:id/colors', (req, res) => {
     const template = templates[req.params.id];
-    
+
     if (!template) {
         return res.status(400).json({ error: 'Template not found' });
     }
-    
+
     const colorsInTemplate = getColorsInTemplate(template.template);
     const colorInfo = colorsInTemplate.map(colorId => ({
         id: colorId,
         name: COLOR_NAMES[colorId] || `Color ${colorId}`,
         rgb: Object.keys(palette).find(key => palette[key] === colorId) || null
     }));
-    
+
     res.json({
         templateId: req.params.id,
         templateName: template.name,
