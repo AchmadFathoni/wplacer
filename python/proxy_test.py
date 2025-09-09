@@ -4,9 +4,20 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm  # progress bar
 
 PROXIES_FILE = Path("data/proxies.txt")
-TEST_URL = "https://httpbin.org/ip"
+TEST_URL = "https://wplace.live"
 TIMEOUT = 10  # seconds
 MAX_WORKERS = 20  # number of threads
+
+# Browser-like headers (important for avoiding 403)
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/127.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 
 def load_proxies(file_path):
@@ -23,10 +34,9 @@ def test_proxy(proxy):
     """Test a single proxy. Return proxy if working, None otherwise."""
     proxies = {"http": proxy, "https": proxy}
     try:
-        response = requests.get(TEST_URL, proxies=proxies, timeout=TIMEOUT)
-        if response.status_code == 200:
-            ip = response.json().get("origin", "Unknown")
-            return f"{proxy} -> IP: {ip}"
+        response = requests.get(TEST_URL, proxies=proxies, headers=HEADERS, timeout=TIMEOUT)
+        if response.status_code == 200 and "<!doctype html>" in response.text.lower():
+            return f"{proxy} -> OK (HTML {len(response.text)} bytes)"
     except Exception:
         pass
     return None
@@ -60,4 +70,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
