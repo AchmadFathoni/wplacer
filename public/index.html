@@ -64,8 +64,12 @@
                 <b>Total Droplets:</b> <span id="totalDroplets">?</span> |
                 <b>PPH:</b> <span id="totalPPH">?</span>
             </div>
-            <button id="checkUserStatus" class="primary-button"><img src="icons/check.svg" alt="">Check Account
-                Status</button>
+            <div class="user-actions">
+                <button id="checkUserStatus" class="primary-button"><img src="icons/check.svg" alt="">Check Account Status</button>
+                <button id="exportJTokens" class="secondary-button"><img src="icons/download.svg" alt="">Export J Tokens</button>
+                <button id="importJTokens" class="secondary-button"><img src="icons/upload.svg" alt="">Import J Tokens</button>
+                <input type="file" id="importJTokensInput" accept=".txt" style="display: none;">
+            </div>
             <div id="userList"></div>
 
             <button onclick="changeTab('main');" class="secondary-button"><img src="icons/return.svg"
@@ -266,10 +270,23 @@
                     alt="">Return</button>
         </div>
 
-        <p class="credits">Made by <a href="https://github.com/luluwaffless">luluwaffless <img src="icons/github.svg"
-                    alt="GitHub"></a> and <a href="https://github.com/JinxTheCatto">Jinx <img src="icons/github.svg"
-                    alt="GitHub"></a>
+        <p class="credits">
+        Made by 
+        <a href="https://github.com/luluwaffless">
+            luluwaffless <img src="https://avatars.githubusercontent.com/u/96322105?v=4" alt="GitHub">
+        </a> 
+        and 
+        <a href="https://github.com/JinxTheCatto">
+            Jinx <img src="https://avatars.githubusercontent.com/u/59938808?v=4.png" alt="GitHub">
+        </a>
+
+        <!-- Small GIF -->
+        <img 
+            src="icons/jazzhands.webp" 
+            alt="Cute cat" 
+            class="credits-gif">
         </p>
+
     </div>
 
     <div id="messageBoxOverlay" class="hidden">

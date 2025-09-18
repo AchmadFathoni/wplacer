@@ -1496,6 +1496,8 @@ class TemplateManager {
                                 log('SYSTEM', 'wplacer', `[${this.name}] ⏳ No users ready. Waiting ~${duration(waitTime)}.`);
                                 await this.cancellableSleep(waitTime);
                                 log('SYSTEM', 'wplacer', `[${this.name}] 🫃 Woke up. Re-evaluating...`);
+                                // FIX: Break from the inner pass loop to allow a full re-scan of the canvas state.
+                                break;
                             }
                         }
                     }
